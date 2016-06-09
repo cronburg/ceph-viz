@@ -15,8 +15,8 @@ def get_files_in_dir_matching(directory, regex, matches=False):
   if matches: return ms
   return [m[0] for m in ms]
 
-def load_fio_file(fn):
-  return np.genfromtxt(fn, delimiter=',', dtype=int)
+def load_fio_file(fn, dtype=int):
+  return np.genfromtxt(fn, delimiter=',', dtype=dtype)
 
 def load_all_fio_files(fns, progress=DEF_PROGRESS):
   data = []
