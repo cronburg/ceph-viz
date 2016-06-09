@@ -8,6 +8,7 @@ import pprint
 import matplotlib
 matplotlib.use("Agg")
 import pylab
+from helpers import *
 
 p = argparse.ArgumentParser()
 def arg(*args, **kwargs): p.add_argument(*args, **kwargs)
@@ -18,22 +19,12 @@ arg('percentile', help='what percentile to calculate, in (0,100]')
 arg('log_type', default="clat", help='which data set to use. defaults to "clat"')
 ctx = p.parse_args()
 
-window_size = int(sys.argv[2])
-pctile = int(sys.argv[3])
+pctile = int(ctx.percentile)
 
 data_files = glob(os.path.join(ctx.log_dir, '1_%s.*.log' % (ctx.log_type,)))
 #print data_files
 
-data = []
-for i,log_fn in enumerate(data_files):
-  arr = np.genfromtxt(log_fn, delimiter=',', dtype=int)
-  data.extend(arr)
-  print "Loaded: %03d/%03d" % (i,len(data_files))
-  break # TODO: remove
-
-print "Sorting..."
-data = sorted(data, key=lambda x: x[0])
-print "Done sorting."
+data = sort_data(load_all_fio_files(data_files), lambda x: x[0])
 
 print "Dimensions: (%d,%d)" % (len(data), len(data[0]))
 times,values,directions,size = np.transpose(data)
@@ -55,14 +46,15 @@ while i < len(data):
 
   # Determine the endpoint of this window:
   j = i
-  while j < len(times) and (times[j] - times[i] < window_size):
+  while j < len(times) and (times[j] - times[i] < ctx.window_size):
     j += 1
   j += 1
-#    print (times[j]-times[i],window_size)
+#    print (times[j]-times[i],ctx.window_size)
 
   ts = times[i:j]
   vs = values[i:j]
- 
+
+  #pdb.set_trace()
   percentiles.append((len(ts), ts[-1] - ts[0], np.percentile(vs, pctile)))
   #print i,j,len(times)
   done = int(100 * float(ts[-1]) / times[-1])
