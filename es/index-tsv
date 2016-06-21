@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+
+from __future__ import print_function
+
+import sys, os, time, re, csv, codecs, configparser, hashlib
+from optparse import OptionParser
+from elasticsearch import VERSION, Elasticsearch, helpers, exceptions as es_excs
+from urllib3 import exceptions as ul_excs, Timeout
+
+# Version of this tool, <major>.<minor>.<rev>-<build>, where:
+#
+#   major: systemic layout change to _metadata or other field structures,
+#          not backward compatible
+#   minor: backward compatible layout changes to names, etc.
+#   rev:   completely compatible changes or additions made
+#   build: identifying build number, should not represent any changes
+#
+# Started at 1.0.0-0 since we initiated this after a trial period.
+#
+_VERSION_ = "2.0.0-1"
+_NAME_ = "index-tsv"
+
+_op_type = "create"
+
+
+_read_timeout = 30
+
+
+def get_hosts(config):
+    """
+    Return list of dicts (a single dict for now) -
+    that's what ES is expecting.
+    """
+    try:
+        URL = config.get('Server', 'server')
+    except configparser.NoSectionError:
+        print("Need a [Server] section with host and port defined in %s"
+              " configuration file" % (" ".join(config.__files__)),
+                file=sys.stderr)
+        return None
+    except configparser.NoOptionError:
+        host = config.get('Server', 'host')
+        port = config.get('Server', 'port')
+    else:
+        host, port = URL.rsplit(':', 1)
+    timeoutobj = Timeout(total=1200, connect=10, read=_read_timeout)
+    return [dict(host=host, port=port, timeout=timeoutobj),]
+
+
+def set_es_logging():
+    # Silence logging messages from the elasticsearch client library
+    import logging
+    try:
+        from logging import NullHandler
+    except ImportError:
+        class NullHandler(logging.Handler):
+            def handle(self, record):
+                pass
+            def emit(self, record):
+                pass
+            def createLock(self):
+                self.lock = None
+    logging.getLogger('elasticsearch').addHandler(NullHandler())
+
+
+def es_index_tsv(es, actions, dbg=0):
+    """
+    Now do the indexing specified by the actions.
+    """
+    delay = _read_timeout
+    tries = 20
+
+    beg, end = time.time(), None
+    start = beg
+    if dbg > 0:
+        print("\tbulk index (beg ts: %s) ..." % tstos(beg))
+        sys.stdout.flush()
+    while True:
+        try:
+            res = helpers.bulk_index(es, actions)
+        except es_excs.ConnectionError as err:
+                end = time.time()
+                if isinstance(err.info, ul_excs.ReadTimeoutError):
+                    tries -= 1
+                    if tries > 0:
+                        print("\t\tWARNING (end ts: %s, duration: %.2fs):"
+                              " read timeout, delaying %d seconds before"
+                              " retrying (%d attempts remaining)..." % (
+                                  tstos(end), end - beg, delay, tries),
+                                  file=sys.stderr)
+                        time.sleep(delay)
+                        delay *= 2
+                        beg, end = time.time(), None
+                        print("\t\tWARNING (beg ts: %s): retrying..." % (
+                            tstos(beg)), file=sys.stderr)
+                        continue
+                print("\tERROR(%s) (end ts: %s, duration: %.2fs): %s" % (
+                    _NAME_, tstos(end), end - start, err), file=sys.stderr)
+                return 1
+        except helpers.BulkIndexError as err:
+            end = time.time()
+            len_errors = len(err.errors)
+            error_idx = 0
+            lcl_successes = 0
+            lcl_duplicates = 0
+            lcl_errors = 0
+            for e in err.errors:
+                sts = e[_op_type]['status']
+                if sts not in (200, 201):
+                    if _op_type == 'create' and sts == 409:
+                        lcl_duplicates += 1
+                    else:
+                        if _DEBUG > 8:
+                            import pdb; pdb.set_trace()
+                        print("\t\tERRORS (%d of %d): %r" % (
+                            error_idx, len_errors, e[_op_type]['error']),
+                            file=sys.stderr)
+                        lcl_errors += 1
+                else:
+                    lcl_successes += 1
+            if dbg > 0 or lcl_errors > 0:
+                print("\tdone (end ts: %s, duration: %.2fs,"
+                      " success: %d, duplicates: %d, errors: %d)" % (
+                          tstos(end), end - start, lcl_successes,
+                          lcl_duplicates, lcl_errors))
+                sys.stdout.flush()
+        except Exception as err:
+            end = time.time()
+            print("\tERROR(%s) (end ts: %s, duration: %.2fs): %s" % (
+                _NAME_, tstos(end), end - start, err), file=sys.stderr)
+            return 1
+        else:
+            end = time.time()
+            successes = res[0]
+            duplicates = 0
+            errors = 0
+            len_res1 = len(res[1])
+            for idx, ires in enumerate(res[1]):
+                sts = ires[_op_type]['status']
+                if sts not in (200, 201):
+                    if _op_type == 'create' and sts == 409:
+                        duplicates += 1
+                    else:
+                        print("\t\tERROR (%d of %d): %r" % (
+                            idx, len_res1, ires[_op_type]['error']),
+                            file=sys.stderr)
+                        errors += 1
+                else:
+                    successes += 1
+            if dbg > 0 or errors > 0:
+                print("\tdone (end ts: %s, duration: %.2fs,"
+                    " success: %d, duplicates: %d, errors: %d)" % (
+                        tstos(end), end - start, successes, duplicates,
+                        errors))
+                sys.stdout.flush()
+            if errors > 0:
+                if successes > 0:
+                    modifier = "some "
+                else:
+                    modifier = ""
+                    print("\tERROR(%s) %serrors encountered during indexing" % (
+                        _NAME_, modifier), file=sys.stderr)
+                    return 1
+            break
+    return 0
+
+
+def main(args, opts):
+    if VERSION < (1, 0, 0):
+        print("At least v1.0.0 of the ElasticSearch Python client is required,"
+                " found %r" % (VERSION,), file=sys.stderr)
+        return 1
+
+    actions = []
+
+    if opts.debug:
+        dbg = opts.debug
+    else:
+        dbg = 0
+
+    cfg_name = os.environ.get('ES_CONFIG_PATH')
+    if cfg_name is None:
+        print("Need ES_CONFIG_PATH environment variable defined",
+              file=sys.stderr)
+        return 1
+
+    config = configparser.ConfigParser()
+    config.read(cfg_name)
+
+    # there is one es instance for everybody, but it uses config file stuff
+    # that I don't want to expose here, so we initialize it
+    # in the first iteration of the loop, after we get the stf
+    # object (through which we get to the config stuff).
+    if dbg < 2:
+        hosts = get_hosts(config)
+        if not hosts:
+            return 1
+        es = Elasticsearch(hosts, max_retries=0)
+        set_es_logging()
+    else:
+        es = None
+
+    actions = []
+    # Read in entire CSV file
+    with codecs.open(args[0], encoding="iso-8859-1") as csvfile:
+        reader = csv.DictReader(csvfile, delimiter='\t')
+        for row in reader:
+            row['count'] = int(row['count'])
+            row['rhel_major_version'] = int(row['rhel_major_version'])
+            row['@timestamp'] = '2016-03-16T12:00:00.000000Z'
+            actions.append({
+                "_op_type": _op_type,
+                "_index": "rhel-pkgs-2016.03.16",
+                "_type": "rhel-pkg-data",
+                "_source": row
+                })
+    if not actions:
+        print("No data found in %s" % args[0], file=sys.stderr)
+        return 1
+
+    if dbg >= 2:
+        print(actions)
+
+    if not es:
+        return 0
+
+    return es_index_tsv(es, actions)
+
+# additional options can be added here and passed to parse_args
+# options = [
+#     make_option("-a", "--all", action="store_true", dest="all",
+#                 help="Placeholder help")
+# ]
+
+def parse_args(options=[], usage=None):
+    if usage:
+        parser = OptionParser(usage=usage)
+    else:
+        parser = OptionParser()
+    # standard options
+    parser.add_option("-C", "--config", dest="filename",
+                  help="config FILE", metavar="FILE")
+    parser.add_option("-D", "--debug", dest="debug",
+                      help="Set debugging level (0-9)")
+    # specific options
+    for o in options:
+        parser.add_option(o)
+
+    return parser.parse_args()
+
+# debug levels
+# 0 : normal operation (equivalent to no -D)
+# 1 : verbose - some informational messages
+# 2 and above : print action list to stdout and don't do any ES stuff
+if __name__ == '__main__':
+    opts, args = parse_args(usage="Usage: index-tsv [options] <tsv file>...")
+    status = main(args, opts)
+    sys.exit(status)
