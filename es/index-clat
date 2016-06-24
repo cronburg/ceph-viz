@@ -1,0 +1,25 @@
+#!/usr/bin/env python
+import sys, csv
+from elasticsearch import VERSION, Elasticsearch, helpers, exceptions as es_excs
+
+p = OptionParser(usage="Usage: index-clat [options <fio-clat file>...")
+p.add_option("-T", "--thread", dest="thread", help="thread number for data source")
+p.add_option("-H", "--hostname", dest="hostname", help="unique identifier (hostname) for data source")
+p.add_option("-E", "--es", dest="elastic_host", default="localhost", help="hostname of the ES instance")
+p.add_option("-P", "--port", dest="port", default=9200, help="port number of ES instance")
+opts, args = p.parse_args()
+
+reader = csv.DictReader(sys.stdin, fieldnames=["time", "clat", "rw", "sz"], delimiter=',')
+for row in reader:
+	row = {k: int(v) for k, v in row.items()}
+	row["host"] = opts.hostname
+	row["thread"] = opts.thread
+	row['@timestamp'] = '2016-06-21T12:00:00.000000Z'
+	actions.append({
+		"_op_type": _op_type,
+		"_index": "fio-test-index-2016.06.21",
+		"_type":  "run0",
+		"_source": row})
+
+#res = helpers.bulk_index(es, actions)
+
