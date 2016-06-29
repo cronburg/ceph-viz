@@ -5,6 +5,7 @@ from numpy import genfromtxt, lexsort, around, where, logical_and, logical_or
 land = logical_and
 lor  = logical_or
 from itertools import islice
+import argparse
 
 def weighted_percentile(percs, vs, ws):
     """ Use linear interpolation to calculate the weighted percentile """
@@ -54,24 +55,23 @@ def process_interval(samples, start, end):
         fmt = "%d, %d, " + ', '.join(["%.4f"] * 7)
         print (fmt % tuple(row))
 
-BUFF_SIZE = 10000
 def read_next(fp, sz):
     with np.warnings.catch_warnings():
         np.warnings.simplefilter("ignore")
-        return genfromtxt(islice(fp, BUFF_SIZE), dtype=int, delimiter=',')
+        return genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
 
 def main(ctx):
-    with open(sys.argv[1], 'r') as fp:
+    with open(ctx.filename, 'r') as fp:
         start = 0
         end = INTERVAL
-        arr = read_next(fp, BUFF_SIZE)
+        arr = read_next(fp, ctx.buff_size)
         more_data = True
         while more_data or len(arr) > 0:
 
             # Read up to 5 minutes of data from end of current interval.
             while len(arr) == 0 or arr[-1][0] < 300 * 1000 + end:
-                new_arr = read_next(fp, BUFF_SIZE)
-                if new_arr.shape[0] < BUFF_SIZE:
+                new_arr = read_next(fp, ctx.buff_size)
+                if new_arr.shape[0] < ctx.buff_size:
                     more_data = False
                     break
                 arr = np.append(arr, new_arr, axis=0)
@@ -88,5 +88,11 @@ def main(ctx):
             end = start + INTERVAL
 
 if __name__ == '__main__':
-    main(None) # TODO: argparse
+    p = argparse.ArgumentParser()
+    arg = p.add_argument
+    arg('-f', '--filename', required=True, help='filename of latency log file')
+    arg('--max_latency', default=300, type=float, help='number of seconds of data to process at a time')
+    arg('-i', '--interval', default=1000, type=int, help='interval width (ms)')
+    arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
+    main(p.parse_args())
 
