@@ -53,6 +53,6 @@ for start in range(0, mx, INTERVAL):
 
     # Output formatting same as current fiologparser:
     row = [end, len(ss), np.min(vs), np.average(vs)] + list(ps) + [np.max(vs)]
-    fmt = "%d, %d" + ', '.join(["%.4f"] * 7)
+    fmt = "%d, %d, " + ', '.join(["%.4f"] * 7)
     print (fmt % tuple(row))
 
