@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2.7
 import sys
 import numpy as np
 from numpy import genfromtxt, lexsort, around, where, logical_and, logical_or
