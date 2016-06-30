@@ -84,8 +84,20 @@ def read_next(fp, sz):
         np.warnings.simplefilter("ignore")
         return genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
 
+def fio_generator(fps):
+    """ Create a generator for reading multiple fio files in end-time order """
+    lines = {fp: fp.next() for fp in fps}
+    while True:
+        # Get fp with minimum value in the first column (fio log end-time value)
+        fp = min(lines, key=lambda k: int(lines.get(k).split(',')[0]))
+        yield lines[fp]
+        lines[fp] = fp.next() # read a new line into our dictionary
+
 def main(ctx):
-    with open(ctx.filename, 'r') as fp:
+    fps = [open(f, 'r') for f in ctx.files]
+    fp = fio_generator(fps)
+    
+    try:
         start = 0
         end = ctx.interval
         arr = read_next(fp, ctx.buff_size)
@@ -110,11 +122,13 @@ def main(ctx):
 
             start += ctx.interval
             end = start + ctx.interval
+    finally:
+        map(lambda f: f.close(), fps)
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     arg = p.add_argument
-    arg('-f', '--filename', required=True, help='filename of latency log file')
+    arg('-f', '--files', required=True, help='filename of latency log file', nargs='+')
     arg('--max_latency', default=300, type=float, help='number of seconds of data to process at a time')
     arg('-i', '--interval', default=10000, type=int, help='interval width (ms)')
     arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
