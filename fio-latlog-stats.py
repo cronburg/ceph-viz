@@ -45,7 +45,7 @@ def weights(start_ts, end_ts, start, end):
 columns = ["end-time", "samples", "min", "avg", "median", "90%", "95%", "99%", "max"]
 percs   = [50, 90, 95, 99]
 print(', '.join(columns))
-def process_interval(samples, start, end):
+def process_interval(ctx, samples, start, end):
     """ Determine which of the given samples occur during the given interval,
         then compute and print the desired statistics - min, avg, percentiles, max.
 
@@ -75,7 +75,7 @@ def process_interval(samples, start, end):
 
         # Output formatting same as '-A' option of fiologparser:
         row = [end, len(ss), np.min(vs), np.average(vs)] + list(ps) + [np.max(vs)]
-        fmt = "%d, %d, " + ', '.join(["%.4f"] * 7)
+        fmt = "%d, %d, " + ', '.join(["%%.%df" % ctx.decimals] * 7)
         print (fmt % tuple(row))
 
 def read_next(fp, sz):
@@ -115,7 +115,7 @@ def main(ctx):
                     break
                 arr = np.append(arr, new_arr, axis=0)
 
-            process_interval(arr, start, end)
+            process_interval(ctx, arr, start, end)
         
             # Update arr to throw away samples we no longer need - samples which
             # end before the start of the next interval, i.e. the end of the
@@ -135,5 +135,6 @@ if __name__ == '__main__':
     arg('--max_latency', default=300, type=float, help='number of seconds of data to process at a time')
     arg('-i', '--interval', default=10000, type=int, help='interval width (ms)')
     arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
+    arg('-d', '--decimals', default=3, type=int, help='number of decimal places to print floats to')
     main(p.parse_args())
 
