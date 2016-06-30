@@ -82,7 +82,10 @@ def read_next(fp, sz):
     """ Helper to get rid of 'empty file' warnings """
     with np.warnings.catch_warnings():
         np.warnings.simplefilter("ignore")
-        return genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
+        data = genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
+        if len(data.shape) == 1:
+            return np.array([data]) # Single-line files are dumb.
+        return data
 
 def fio_generator(fps):
     """ Create a generator for reading multiple fio files in end-time order """
