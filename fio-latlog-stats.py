@@ -128,7 +128,7 @@ def main(ctx):
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     arg = p.add_argument
-    arg('-f', '--files', required=True, help='filename of latency log file', nargs='+')
+    arg('-f', '--files', required=True, help='space separated list of latency log filenames', nargs='+')
     arg('--max_latency', default=300, type=float, help='number of seconds of data to process at a time')
     arg('-i', '--interval', default=10000, type=int, help='interval width (ms)')
     arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
