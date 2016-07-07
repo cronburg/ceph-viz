@@ -6,6 +6,7 @@ land, lor, lnot = np.logical_and, np.logical_or, np.logical_not
 from itertools import islice
 import argparse
 import os
+import pandas
 
 debug = not (os.getenv("DEBUG") is None)
 
@@ -82,7 +83,8 @@ def read_next(fp, sz):
     """ Helper to get rid of 'empty file' warnings """
     with np.warnings.catch_warnings():
         np.warnings.simplefilter("ignore")
-        data = genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
+        #data = genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
+        data = pandas.read_csv(Reader(islice(fp, sz)), dtype=int, header=None).values
         if len(data.shape) == 1:
             return np.array([data]) # Single-line files are dumb.
         return data
@@ -95,6 +97,18 @@ def fio_generator(fps):
         fp = min(lines, key=lambda k: int(lines.get(k).split(',')[0]))
         yield lines[fp]
         lines[fp] = fp.next() # read a new line into our dictionary
+
+class Reader(object):
+    def __init__(self, g):
+        self.g = g
+    def read(self, n=0):
+        try:
+            return next(self.g)
+        except StopIteration:
+            return ''
+
+#iter_csv = pandas.read_csv('file.csv', iterator=True, chunksize=1000)
+#df = pd.concat([chunk[chunk['field'] > constant] for chunk in iter_csv])
 
 def main(ctx):
     fps = [open(f, 'r') for f in ctx.files]
