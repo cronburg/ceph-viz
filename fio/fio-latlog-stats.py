@@ -79,12 +79,18 @@ def process_interval(ctx, samples, start, end):
         fmt = "%d, %d, " + ', '.join(["%%.%df" % ctx.decimals] * 7)
         print (fmt % tuple(row))
 
+def read_csv(fp, sz):
+    try:
+      return pandas.read_csv(Reader(islice(fp, sz)), dtype=int, header=None).values
+    except ValueError:
+      return np.empty(0)
+
 def read_next(fp, sz):
     """ Helper to get rid of 'empty file' warnings """
     with np.warnings.catch_warnings():
         np.warnings.simplefilter("ignore")
         #data = genfromtxt(islice(fp, sz), dtype=int, delimiter=',')
-        data = pandas.read_csv(Reader(islice(fp, sz)), dtype=int, header=None).values
+        data = read_csv(fp, sz)
         if len(data.shape) == 1:
             return np.array([data]) # Single-line files are dumb.
         return data
@@ -92,9 +98,11 @@ def read_next(fp, sz):
 def fio_generator(fps):
     """ Create a generator for reading multiple fio files in end-time order """
     lines = {fp: fp.next() for fp in fps}
+
     while True:
         # Get fp with minimum value in the first column (fio log end-time value)
         fp = min(lines, key=lambda k: int(lines.get(k).split(',')[0]))
+        #print("fuck you you fucking fuck", lines[fp])
         yield lines[fp]
         lines[fp] = fp.next() # read a new line into our dictionary
 
