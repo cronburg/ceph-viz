@@ -102,7 +102,6 @@ def fio_generator(fps):
     while True:
         # Get fp with minimum value in the first column (fio log end-time value)
         fp = min(lines, key=lambda k: int(lines.get(k).split(',')[0]))
-        #print("fuck you you fucking fuck", lines[fp])
         yield lines[fp]
         lines[fp] = fp.next() # read a new line into our dictionary
 
@@ -156,7 +155,8 @@ if __name__ == '__main__':
     arg('-f', '--files', required=True, help='space separated list of latency log filenames', nargs='+')
     arg('--max_latency', default=300, type=float, help='number of seconds of data to process at a time')
     arg('-i', '--interval', default=10000, type=int, help='interval width (ms)')
-    arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
+    arg('-d', '--divisor', required=False, type=int, default=1, help='divide the results by this value.')
+		arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
     arg('-d', '--decimals', default=3, type=int, help='number of decimal places to print floats to')
     main(p.parse_args())
 
