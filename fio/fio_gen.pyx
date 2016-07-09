@@ -1,3 +1,7 @@
+""" Cythonizing this gave an ~20% overall speedup. The call to min()
+    was the main culprit, which includes the str.split() and int()
+    (6.4 seconds out of a 35.5 second run).
+"""
 
 # TODO: seem to be losing data points at the end of the file - make sure the
 # lines dictionary here is being fully flushed by the generator...
