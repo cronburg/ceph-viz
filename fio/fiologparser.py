@@ -186,13 +186,14 @@ def main(ctx):
                     break
                 arr = np.append(arr, new_arr, axis=0)
 
-            process_interval(ctx, arr, start, end)
+            if arr.size > 0:
+                process_interval(ctx, arr, start, end)
         
-            # Update arr to throw away samples we no longer need - samples which
-            # end before the start of the next interval, i.e. the end of the
-            # current interval:
-            idx = where(arr[:,0] > end)
-            arr = arr[idx]
+                # Update arr to throw away samples we no longer need - samples which
+                # end before the start of the next interval, i.e. the end of the
+                # current interval:
+                idx = where(arr[:,0] > end)
+                arr = arr[idx]
 
             start += ctx.interval
             end = start + ctx.interval

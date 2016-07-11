@@ -2,12 +2,20 @@
     was the main culprit, which includes the str.split() and int()
     (6.4 seconds out of a 35.5 second run).
 """
+import sys
+import re
+err = sys.stderr.write
+row_re = re.compile("^\d+,\s\d+,\s\d+,\s\d+\s+$")
 
 def next_no_stop_iter(fp):
     try:
-        return fp.next()
+        while True:
+            line = fp.next()
+            if row_re.match(line):
+                return line
+            err("WARNING: Ignoring line '%s' - does not match expected format.\n" % line.rstrip())
     except StopIteration:
-        pass
+        return None
 
 def get_time(line):
     try:
