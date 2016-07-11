@@ -143,9 +143,9 @@ def process_interval(ctx, samples, start, end):
 
 def read_csv(fp, sz):
     try:
-      return pandas.read_csv(Reader(islice(fp, sz)), dtype=int, header=None).values
+        return pandas.read_csv(Reader(islice(fp, sz)), dtype=int, header=None).values
     except ValueError:
-      return np.empty((0,5))
+        return np.empty((0,5))
 
 def read_next(fp, sz):
     data = read_csv(fp, sz)

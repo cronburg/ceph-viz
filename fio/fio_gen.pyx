@@ -3,15 +3,36 @@
     (6.4 seconds out of a 35.5 second run).
 """
 
-# TODO: seem to be losing data points at the end of the file - make sure the
-# lines dictionary here is being fully flushed by the generator...
+def next_no_stop_iter(fp):
+    try:
+        return fp.next()
+    except StopIteration:
+        pass
+
+def get_time(line):
+    try:
+        return int(line.split(',')[0])
+    except ValueError:
+        return None
+
+def get_min(lines, fps):
+    mn_fp, mn_time = None, None
+    for fp in fps:
+        line = lines.get(fp)
+        if not line is None:
+            time = get_time(line)
+            if (not time is None) and (mn_time is None or time < mn_time):
+                mn_time, mn_fp = time, fp
+    return mn_fp
+
 def fio_generator(fps):
     """ Create a generator for reading multiple fio files in end-time order """
-    lines = {fp: fp.next() for fp in fps}
+    lines = {fp: next_no_stop_iter(fp) for fp in fps}
 
     while True:
         # Get fp with minimum value in the first column (fio log end-time value)
-        fp = min(lines, key=lambda k: int(lines.get(k).split(',')[0]))
+        fp = get_min(lines, fps)
+        if fp is None: break
         yield (lines[fp].rstrip() + ", " + str(fps.index(fp)) + '\n')
-        lines[fp] = fp.next() # read a new line into our dictionary
-
+        lines[fp] = next_no_stop_iter(fp) # read a new line into our dictionary
+    
