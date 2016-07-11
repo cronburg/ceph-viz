@@ -58,7 +58,6 @@ def weights(start_ts, end_ts, start, end):
 
 columns = ["end-time", "samples", "min", "avg", "median", "90%", "95%", "99%", "max"]
 percs   = [50, 90, 95, 99]
-print(', '.join(columns))
 
 def fmt_float_list(ctx, num=1):
   """ Return a comma separated list of float formatters to the required number
@@ -91,7 +90,6 @@ def print_full(ctx, vs, ws, ss, end):
 def print_all_stats(ctx, vs, ws, ss, end):
     ps = weighted_percentile(percs, vs, ws)
 
-    # Output formatting same as '-A' option of fiologparser:
     values = [np.min(vs), np.average(vs)] + list(ps) + [np.max(vs)]
     row = [end, len(ss)] + map(lambda x: float(x) / ctx.divisor, values)
     fmt = "%d, %d, " + fmt_float_list(ctx, 7)
@@ -168,7 +166,10 @@ class Reader(object):
 def main(ctx):
     fps = [open(f, 'r') for f in ctx.FILE]
     fp = fio_generator(fps)
-    
+   
+    if ctx.allstats:
+        print(', '.join(columns))
+
     try:
         start = 0
         end = ctx.interval
