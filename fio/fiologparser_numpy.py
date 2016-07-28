@@ -1,4 +1,20 @@
 #!/usr/bin/env python2.7
+""" NumPy + Pandas + Cython optimized streaming version of fiologparser.
+    
+    This tool parses multiple fio log files, computing interval statistics
+    using weighted percentiles to account for samples spanning multiple
+    intervals.
+
+    Example usages:
+
+        # Compute per-interval sums across all bandwidth files:
+        $ fiologparser.py -s -bw /path/to/fio/logs/*_bw*
+
+        # Compute all statistics for completion latency files:
+        $ fiologparser.py -A -lat /path/to/fio/logs/*_clat*
+    
+    @author Karl Cronburg <karl@cronburg.com>
+"""
 import sys
 import numpy as np
 from numpy import genfromtxt, lexsort, around, where
@@ -6,10 +22,59 @@ land, lor, lnot = np.logical_and, np.logical_or, np.logical_not
 from itertools import islice
 import argparse
 import os
-import pandas
 
-import pyximport; pyximport.install()
-from fio_gen import fio_generator
+try:
+    import pandas
+except ImportError:
+    pass
+
+try:
+    import pyximport; pyximport.install()
+    from fio_generator import fio_generator
+except ImportError:
+    """ User does not have Cython installed, or is otherwise missing the
+        fio_generator.pyx file. Skip cythonizing by putting code directly here too: """
+
+    import re
+    err = sys.stderr.write
+    row_re = re.compile("^\d+,\s\d+,\s\d+,\s\d+\s+$")
+
+    def next_no_stop_iter(fp):
+        try:
+            while True:
+                line = fp.next()
+                if row_re.match(line):
+                    return line
+                err("WARNING: Ignoring line '%s' - does not match expected format.\n" % line.rstrip())
+        except StopIteration:
+            return None
+
+    def get_time(line):
+        try:
+            return int(line.split(',')[0])
+        except ValueError:
+            return None
+
+    def get_min(lines, fps):
+        mn_fp, mn_time = None, None
+        for fp in fps:
+            line = lines.get(fp)
+            if not line is None:
+                time = get_time(line)
+                if (not time is None) and (mn_time is None or time < mn_time):
+                    mn_time, mn_fp = time, fp
+        return mn_fp
+
+    def fio_generator(fps):
+        """ Create a generator for reading multiple fio files in end-time order """
+        lines = {fp: next_no_stop_iter(fp) for fp in fps}
+
+        while True:
+            # Get fp with minimum value in the first column (fio log end-time value)
+            fp = get_min(lines, fps)
+            if fp is None: break
+            yield (lines[fp].rstrip() + ", " + str(fps.index(fp)) + '\n')
+            lines[fp] = next_no_stop_iter(fp) # read a new line into our dictionary
 
 debug = not (os.getenv("DEBUG") is None)
 err = sys.stderr.write
@@ -29,7 +94,7 @@ def weighted_percentile(percs, vs, ws):
     """
     idx = np.argsort(vs)
     vs, ws = vs[idx], ws[idx] # weights and values sorted by value
-    cdf = 100 * ws.cumsum() / ws.sum()
+    cdf = 100 * (ws.cumsum() - ws / 2.0) / ws.sum()
     return np.interp(percs, cdf, vs) # linear interpolation
 
 def weights(start_ts, end_ts, start, end):
@@ -69,7 +134,7 @@ def fmt_float_list(ctx, num=1):
 
 def print_sums(ctx, vs, ws, ss, end, divisor=1.0):
     fmt = "%d, " + fmt_float_list(ctx, 1)
-    print (fmt % (end, np.sum(vs * ws) / divisor / ctx.divisor)) 
+    print (fmt % (end, np.sum(vs * ws) / divisor / ctx.divisor))
 
 def print_averages(ctx, vs, ws, ss, end):
     print_sums(ctx, vs, ws, ss, end, divisor=float(len(vs)))
@@ -87,11 +152,11 @@ def print_full(ctx, vs, ws, ss, end):
     
     print (fmt % tuple([end] + row))
 
-def print_all_stats(ctx, vs, ws, ss, end):
+def print_all_stats(ctx, vs, ws, ss_cnt, end):
     ps = weighted_percentile(percs, vs, ws)
 
-    values = [np.min(vs), np.average(vs)] + list(ps) + [np.max(vs)]
-    row = [end, len(ss)] + map(lambda x: float(x) / ctx.divisor, values)
+    values = [np.min(vs), sum(vs * ws) / sum(ws)] + list(ps) + [np.max(vs)]
+    row = [end, ss_cnt] + map(lambda x: float(x) / ctx.divisor, values)
     fmt = "%d, %d, " + fmt_float_list(ctx, 7)
     print (fmt % tuple(row))
 
@@ -118,7 +183,7 @@ def process_interval(ctx, samples, start, end):
     else:
       raise Exception("Please specify either --bandwidth or --latency.")
 
-    # Sort by start time:    
+    # Sort by start time:
     idx = lexsort((start_times,))
     samples = samples[idx]
     times,clats = samples[:,0], samples[:,1]
@@ -136,19 +201,27 @@ def process_interval(ctx, samples, start, end):
         if ctx.sum:         print_sums(ctx, vs, ws, ss, end)
         elif ctx.average:   print_averages(ctx, vs, ws, ss, end)
         elif ctx.full:      print_full(ctx, vs, ws, ss, end)
-        elif ctx.allstats:  print_all_stats(ctx, vs, ws, ss, end)
+        elif ctx.allstats:  print_all_stats(ctx, vs, ws, len(ss), end)
         else:               print_default(ctx, vs, ws, ss, end)
 
-def read_csv(fp, sz):
+def read_csv(ctx, fp, sz):
     try:
-        return pandas.read_csv(Reader(islice(fp, sz)), dtype=int, header=None).values
+        gen = islice(fp, sz)
+        try:
+            data = pandas.read_csv(Reader(gen), dtype=int, header=None).values
+        except NameError:
+            with np.warnings.catch_warnings():
+                np.warnings.simplefilter("ignore")
+                data = np.genfromtxt(gen, delimiter=',')
+            if data.shape == (0,): raise ValueError()
     except ValueError:
-        return np.empty((0,5))
+        data = np.empty((0,5))
+    return data
 
-def read_next(fp, sz):
-    data = read_csv(fp, sz)
+def read_next(ctx, fp, sz):
+    data = read_csv(ctx, fp, sz)
     if len(data.shape) == 1:
-        return np.array([data]) # Single-line files are dumb.
+        return np.array([data]) # Single-line file.
     return data
 
 class Reader(object):
@@ -173,13 +246,13 @@ def main(ctx):
     try:
         start = 0
         end = ctx.interval
-        arr = read_next(fp, ctx.buff_size)
+        arr = read_next(ctx, fp, ctx.buff_size)
         more_data = True
         while more_data or len(arr) > 0:
 
             # Read up to 5 minutes of data from end of current interval.
             while len(arr) == 0 or arr[-1][0] < ctx.max_latency * 1000 + end:
-                new_arr = read_next(fp, ctx.buff_size)
+                new_arr = read_next(ctx, fp, ctx.buff_size)
                 if new_arr.shape[0] < ctx.buff_size:
                     more_data = False
                     arr = np.append(arr, new_arr, axis=0)
@@ -204,17 +277,71 @@ def main(ctx):
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     arg = p.add_argument
-    arg('--max_latency', default=300, type=float, help='number of seconds of data to process at a time')
-    arg('-i', '--interval', default=10000, type=int, help='interval width (ms)')
-    arg('-d', '--divisor', required=False, type=int, default=1, help='divide the results by this value.')
-    arg('-f', '--full', dest='full', action='store_true', default=False, help='print full output.')
-    arg('-A', '--all', dest='allstats', action='store_true', default=False, help='print all stats for each interval.')
-    arg('-a', '--average', dest='average', action='store_true', default=False, help='print the average for each interval.')
-    arg('-s', '--sum', dest='sum', action='store_true', default=False, help='print the sum for each interval.') 
-    arg('--buff_size', default=10000, type=int, help='number of samples to buffer into numpy at a time')
-    arg('--decimals', default=3, type=int, help='number of decimal places to print floats to')
-    arg('-bw', '--bandwidth', dest='bandwidth', action='store_true', default=False, help='input contains bandwidth log files.')
-    arg('-lat', '--latency', dest='latency', action='store_true', default=False, help='input contains latency log files.')
-    arg("FILE", help='space separated list of latency log filenames', nargs='+')
+    arg( '--max_latency'
+       , default=300
+       , type=float
+       , help='number of seconds of data to process at a time'
+       )
+    arg( '-i', '--interval'
+       , default=10000
+       , type=int
+       , help='interval width (ms)'
+       )
+    arg( '-d', '--divisor'
+       , required=False
+       , type=int
+       , default=1
+       , help='divide the results by this value.'
+       )
+    arg( '-f', '--full'
+       , dest='full'
+       , action='store_true'
+       , default=False
+       , help='print full output.'
+       )
+    arg( '-A', '--all'
+       , dest='allstats'
+       , action='store_true'
+       , default=False
+       , help='print all stats for each interval.'
+       )
+    arg( '-a', '--average'
+       , dest='average'
+       , action='store_true'
+       , default=False
+       , help='print the average for each interval.'
+       )
+    arg( '-s', '--sum'
+       , dest='sum'
+       , action='store_true'
+       , default=False
+       , help='print the sum for each interval.'
+       )
+    arg( '--buff_size'
+       , default=10000
+       , type=int
+       , help='number of samples to buffer into numpy at a time'
+       )
+    arg( '--decimals'
+       , default=3
+       , type=int
+       , help='number of decimal places to print floats to'
+       )
+    arg( '-bw', '--bandwidth'
+       , dest='bandwidth'
+       , action='store_true'
+       , default=False
+       , help='input contains bandwidth log files.'
+       )
+    arg( '-lat', '--latency'
+       , dest='latency'
+       , action='store_true'
+       , default=False
+       , help='input contains latency log files.'
+       )
+    arg( "FILE"
+       , help='space separated list of latency log filenames'
+       , nargs='+'
+       )
     main(p.parse_args())
 

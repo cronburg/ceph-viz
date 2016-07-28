@@ -1,0 +1,38 @@
+""" Cythonizing this gave an ~20% overall speedup. The call to min()
+    was the main culprit, which includes the str.split() and int()
+    (6.4 seconds out of a 35.5 second run).
+"""
+
+class FioReader(object):
+
+    def __init__(self, fps):
+        self.fps = fps
+        self.lines = {fp: self.line_parse(fp) for fp in fps}
+
+    def line_parse(self, fp):
+        try:
+            line = fp.next()
+        except StopIteration:
+            import pdb; pdb.set_trace()
+            return (None, None)
+        return (int(line.split(',')[0]), line)
+
+    def read(self, n=0):
+        """ Reads from multiple fio files in end-time order """
+        self.lines = {fp: line_parse(fp) for fp in self.fps}
+
+        # Get fp with minimum value in the first column (fio log end-time value)
+        mn_fp, mn_time = None, None
+        for fp, (time, line) in self.lines.items():
+            if time  is None: continue # skip files we've already read fully
+            if mn_fp is None: mn_fp, mn_time = time, line; continue
+            if time < mn_time:
+                mn_fp, mn_time = fp, time
+
+        #fp = min(self.lines, key=lambda k: int(self.lines.get(k).split(',')[0]))
+        import pdb; pdb.set_trace()
+        _,line = self.lines[mn_fp]
+        self.lines[mn_fp] = line_parse(mn_fp) # read a new line into our dictionary
+        
+        return (line.rstrip() + ", " + str(self.fps.index(mn_fp)) + '\n')
+
