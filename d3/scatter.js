@@ -10,7 +10,7 @@ var svg = d3.select("body").append("svg")
     .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
 var xScale = d3.scale.linear().range([0,width])
-  , yScale = d3.scale.linear().range([0,height])
+  , yScale = d3.scale.linear().range([height,0])
   , color  = d3.scale.category10()
   ;
 
@@ -77,6 +77,20 @@ d3.text("test.csv", txt => {
           .attr("cx", d => xScale(xFncn(d)))
           .attr("cy", d => yScale(yFncn(d)))
           .style("fill", d => color(c))
+  
+      var lineFncn = d3.svg.line()
+        .x(d => xScale(xFncn(d)))
+        .y(d => yScale(yFncn(d)))
+        .interpolate("linear")
+        ;
+
+      svg.append("path")
+          .attr("class", "data_path")
+          .attr("d", lineFncn(data))
+          .attr("stroke", color(c))
+          .attr("stroke-width", 2)
+          .attr("fill", "none")
+          ;
     };
   };
 
